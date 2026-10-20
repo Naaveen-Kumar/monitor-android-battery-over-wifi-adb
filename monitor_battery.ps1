@@ -28,7 +28,7 @@
     Runs the monitor targeting a specific IP and port.
 
 .EXAMPLE
-    powershell -WindowStyle Hidden -File "D:\monitor_battery.ps1" -PhonePort "45678"
+    powershell -WindowStyle Hidden -File "<File location>\monitor_battery.ps1" -PhonePort "45678"
     Runs the script invisibly in the background with a custom port.
 #>
 
