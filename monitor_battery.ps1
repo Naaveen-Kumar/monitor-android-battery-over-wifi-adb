@@ -1,12 +1,13 @@
 <#
 .SYNOPSIS
-    Monitors an Android phone's battery level over wireless ADB and triggers a Windows warning alert if it falls below a specified threshold.
+    Monitors an Android phone's battery level over wireless ADB and triggers Windows alerts for low battery (<= threshold) and fully charged (100%).
 
 .DESCRIPTION
     This script continuously monitors an Android device connected via wireless ADB. 
     - It automatically handles wireless reconnection if the connection drops.
     - It queries the battery percentage using `adb shell dumpsys battery`.
-    - If the battery falls to or below the set threshold, it opens a native Windows popup alert.
+    - If the battery falls to or below the set threshold, it opens a native Windows low-battery warning popup.
+    - If the battery reaches 100%, it opens a notification popup indicating it is fully charged.
     - It can be run invisibly in the background using Windows Terminal or PowerShell.
 
     NOTE: This script assumes you have enabled wireless ADB following the steps mentioned in Project Rend under Settings -> Import -> Game Save - Emulator/Phone -> Connect over wifi.
@@ -28,15 +29,14 @@
     Runs the monitor targeting a specific IP and port.
 
 .EXAMPLE
-    powershell -WindowStyle Hidden -File "<File location>\monitor_battery.ps1" -PhonePort "45678"
+    powershell -WindowStyle Hidden -File "D:\monitor_battery.ps1" -PhonePort "45678"
     Runs the script invisibly in the background with a custom port.
 #>
 
 param(
     [string]$PhoneIP = "192.168.1.50",
     [string]$PhonePort = "37483",
-    [int]$Threshold = 25,
-	[int]$CheckIntervalSeconds = 600
+    [int]$Threshold = 25, [int]$CheckIntervalSeconds = 600
 )
 
 # Load Windows Forms assembly so we can trigger native Windows popup notification dialogs
@@ -88,16 +88,31 @@ while ($true) {
             [int]$batteryLevel = $Matches[0];$timestamp = Get-Date -Format "HH:mm:ss"
             Write-Host "[$timestamp] Current Battery Level:$batteryLevel%" -ForegroundColor Green
 
-            # Check if battery has dropped below or equal to the alert threshold
+            # Check if battery has dropped below or equal to the low alert threshold
             if ($batteryLevel -le$Threshold) {
                 Write-Host "[!] Battery is low ($batteryLevel%!)" -ForegroundColor Red
                 
-                # Trigger Windows GUI Popup Warning Box
+                # Trigger Windows GUI Popup Warning Box for Low Battery
                 [System.Windows.Forms.MessageBox]::Show(
                     "Your Android phone battery is at $batteryLevel%! Please plug it in.", 
                     "Low Battery Warning", 
                     [System.Windows.Forms.MessageBoxButtons]::OK, 
                     [System.Windows.Forms.MessageBoxIcon]::Warning
+                )
+
+                # Sleep for 10 minutes after an alert triggers to avoid spamming warnings
+                Start-Sleep -Seconds 600
+            }
+            # Check if battery is fully charged (100%)
+            elseif ($batteryLevel -ge 100) {
+                Write-Host "[!] Battery is fully charged (100%!)" -ForegroundColor Green
+                
+                # Trigger Windows GUI Popup Info Box for Full Charge
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Your Android phone battery is fully charged (100%)! You can unplug it.", 
+                    "Battery Fully Charged", 
+                    [System.Windows.Forms.MessageBoxButtons]::OK, 
+                    [System.Windows.Forms.MessageBoxIcon]::Information
                 )
 
                 # Sleep for 10 minutes after an alert triggers to avoid spamming warnings
