@@ -1,14 +1,13 @@
 <#
 .SYNOPSIS
-    Monitors an Android phone's battery level over wireless ADB and triggers Windows alerts for low battery and fully charged (only if actively plugged in/charging).
+    Monitors an Android phone's battery level over wireless ADB and triggers Windows alerts for low battery (only if unplugged) and fully charged (only if plugged in).
 
 .DESCRIPTION
     This script continuously monitors an Android device connected via wireless ADB. 
     - It automatically handles wireless reconnection if the connection drops.
     - It queries the battery percentage and power source status using `adb shell dumpsys battery`.
-    - If the battery falls to or below the set threshold, it opens a native Windows low-battery warning popup.
+    - If the battery falls to or below the set threshold AND the phone is unplugged, it opens a native Windows low-battery warning popup.
     - If the battery reaches 100% AND is still plugged into a power source, it opens a fully charged notification popup.
-    - If the battery is at 100% but the phone is unplugged (not charging), it skips the popup to prevent alert spam.
     - It can be run invisibly in the background using Windows Terminal or PowerShell.
 
     NOTE: This script assumes you have enabled wireless ADB following the steps mentioned in Project Rend under Settings -> Import -> Game Save - Emulator/Phone -> Connect over wifi.
@@ -90,28 +89,32 @@ while ($true) {
             [int]$batteryLevel = $Matches[0]; $timestamp = Get-Date -Format "HH:mm:ss"
             Write-Host "[$timestamp] Current Battery Level: $batteryLevel%" -ForegroundColor Green
 
-            # Check if battery has dropped below or equal to the low alert threshold
+            # Check power source status for active charging
+            $isPowered = ($batteryOutput -match "AC powered:\s+true") -or 
+                         ($batteryOutput -match "USB powered:\s+true") -or 
+                         ($batteryOutput -match "Wireless powered:\s+true")
+
+            # Check if battery is low AND phone is NOT charging (unplugged)
             if ($batteryLevel -le $Threshold) {
-                Write-Host "[!] Battery is low ($batteryLevel%!)" -ForegroundColor Red
-                
-                # Trigger Windows GUI Popup Warning Box for Low Battery
-                [System.Windows.Forms.MessageBox]::Show(
-                    "Your Android phone battery is at $batteryLevel%! Please plug it in.", 
-                    "Low Battery Warning", 
-                    [System.Windows.Forms.MessageBoxButtons]::OK, 
-                    [System.Windows.Forms.MessageBoxIcon]::Warning
-                )
+                if (-not $isPowered) {
+                    Write-Host "[!] Battery is low ($batteryLevel%!) and phone is unplugged." -ForegroundColor Red
+                    
+                    # Trigger Windows GUI Popup Warning Box for Low Battery
+                    [System.Windows.Forms.MessageBox]::Show(
+                        "Your Android phone battery is at $batteryLevel%! Please plug it in.", 
+                        "Low Battery Warning", 
+                        [System.Windows.Forms.MessageBoxButtons]::OK, 
+                        [System.Windows.Forms.MessageBoxIcon]::Warning
+                    )
 
-                # Sleep for 10 minutes after an alert triggers to avoid spamming warnings
-                Start-Sleep -Seconds 600
+                    # Sleep for 10 minutes after an alert triggers to avoid spamming warnings
+                    Start-Sleep -Seconds 600
+                } else {
+                    Write-Host "[i] Battery is low ($batteryLevel%), but phone is currently charging. Skipping alert." -ForegroundColor DarkGray
+                }
             }
-            # Check if battery is fully charged (100%)
+            # Check if battery is fully charged (100%) AND phone IS charging
             elseif ($batteryLevel -ge 100) {
-                # Verify if any power source (AC, USB, or Wireless) is actively connected
-                $isPowered = ($batteryOutput -match "AC powered:\s+true") -or 
-                             ($batteryOutput -match "USB powered:\s+true") -or 
-                             ($batteryOutput -match "Wireless powered:\s+true")
-
                 if ($isPowered) {
                     Write-Host "[!] Battery is fully charged (100%) and still plugged in!" -ForegroundColor Green
                     
