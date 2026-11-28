@@ -1,142 +1,47 @@
 <#
 .SYNOPSIS
-    Monitors an Android phone's battery level over wireless ADB and triggers Windows alerts for low battery (only if unplugged) and fully charged (only if plugged in).
+    Connects to an Android device over wireless ADB and launches the battery monitor script in a visible terminal window.
 
 .DESCRIPTION
-    This script continuously monitors an Android device connected via wireless ADB. 
-    - It automatically handles wireless reconnection if the connection drops.
-    - It queries the battery percentage and power source status using `adb shell dumpsys battery`.
-    - If the battery falls to or below the set threshold AND the phone is unplugged, it opens a native Windows low-battery warning popup.
-    - If the battery reaches 100% AND is still plugged into a power source, it opens a fully charged notification popup.
-    - It can be run invisibly in the background using Windows Terminal or PowerShell.
-
-    NOTE: This script assumes you have enabled wireless ADB following the steps mentioned in Project Rend under Settings -> Import -> Game Save - Emulator/Phone -> Connect over wifi.
-
-.PARAMETER PhoneIP
-    The local Wi-Fi IP address of your Android device (found in Wireless Debugging settings). Default is "192.168.1.50".
+    This launcher script takes your Android device's wireless ADB port as an argument, establishes
+    the ADB connection using a specified ADB server port, and starts `monitor_battery.ps1` in a
+    visible PowerShell window so you can monitor live battery level logs.
 
 .PARAMETER PhonePort
-    The dynamic port number assigned by wireless debugging on your phone. Default is "37483".
+    The dynamic port number assigned by wireless debugging on your Android phone. This parameter is mandatory.
 
-.PARAMETER Threshold
-    The battery percentage level that triggers the low-battery warning popup. Default is 25%.
+.PARAMETER PhoneIP
+    The local Wi-Fi IP address of your Android device. Default is "192.168.1.50".
 
-.PARAMETER CheckIntervalSeconds
-    The frequency (in seconds) at which the script checks the battery status. Default is 600 seconds (10 minutes).
+.PARAMETER AdbServerPort
+    The port used by the local ADB server (`adb -P`). Default is 17537.
+
+.PARAMETER MonitorScriptPath
+    Full path to the battery monitoring script to launch. Default is "D:\monitor_battery.ps1".
 
 .EXAMPLE
-    .\monitor_battery.ps1 -PhoneIP "192.168.1.105" -PhonePort "55555"
-    Runs the monitor targeting a specific IP and port.
-
-.EXAMPLE
-    powershell -WindowStyle Hidden -File "D:\monitor_battery.ps1" -PhonePort "45678"
-    Runs the script invisibly in the background with a custom port.
+    powershell -File "D:\start_battery_monitor.ps1" -PhonePort 41235
+    Connects to the default phone IP on port 41235 and opens the live battery monitor window.
 #>
 
 param(
+    [Parameter(Mandatory = $true)]
+    [string]$PhonePort,
+
     [string]$PhoneIP = "192.168.1.50",
-    [string]$PhonePort = "37483",
-    [int]$Threshold = 25,
-    [int]$CheckIntervalSeconds = 600
+
+    [int]$AdbServerPort = 17537,
+
+    [string]$MonitorScriptPath = "D:\monitor_battery.ps1"
 )
 
-# Load Windows Forms assembly so we can trigger native Windows popup notification dialogs
-[Windows.Forms.MessageBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089] | Out-Null
+# Combine IP and port into a single ADB target address
+$target = "$PhoneIP`:$PhonePort"
 
-Write-Host "Starting Android Battery Monitor (Optimized)..." -ForegroundColor Cyan
-Write-Host "Target: $PhoneIP`:$PhonePort | Threshold: $Threshold% | Interval: ${CheckIntervalSeconds}s" -ForegroundColor DarkCyan
+# 1. Connect to the Android device via ADB on the configured server port
+Write-Host "Connecting to $target on ADB server port $AdbServerPort..." -ForegroundColor Cyan
+adb -P $AdbServerPort connect $target
 
-<#
-.SYNOPSIS
-    Tests if the device is connected via ADB and attempts an automatic reconnection if dropped.
-#>
-function Test-And-Reconnect {
-    # 1. Fast check if already connected and active
-    if ((adb devices) -match "$PhoneIP`:$PhonePort\s+device") {
-        return $true
-    }
-
-    # 2. Attempt connection and capture output instantly
-    Write-Host "[*] Reconnecting to $PhoneIP`:$PhonePort..." -ForegroundColor Yellow
-    $connectOutput = adb connect "$PhoneIP`:$PhonePort" 2>&1
-
-    # 3. Check if connection was successful right away
-    if ($connectOutput -match "connected") {
-        Write-Host "[+] Successfully reconnected!" -ForegroundColor Green
-        return $true
-    }
-
-    # 4. Fallback double-check via devices list
-    Start-Sleep -Seconds 1
-    if ((adb devices) -match "$PhoneIP`:$PhonePort\s+device") {
-        Write-Host "[+] Successfully reconnected!" -ForegroundColor Green
-        return $true
-    }
-
-    Write-Host "[-] Reconnection failed. Will retry in the next cycle." -ForegroundColor Red
-    return $false
-}
-
-# Main execution loop
-while ($true) {
-    # Ensure device is connected before querying battery
-    if (Test-And-Reconnect) {
-        # Fetch raw battery status dump from Android
-        $batteryOutput = adb -s "$PhoneIP`:$PhonePort" shell dumpsys battery
-        $levelLine = $batteryOutput | Select-String "level:"
-
-        if ($levelLine -match '\d+') {
-            [int]$batteryLevel = $Matches[0]; $timestamp = Get-Date -Format "HH:mm:ss"
-            Write-Host "[$timestamp] Current Battery Level: $batteryLevel%" -ForegroundColor Green
-
-            # Check power source status for active charging
-            $isPowered = ($batteryOutput -match "AC powered:\s+true") -or 
-                         ($batteryOutput -match "USB powered:\s+true") -or 
-                         ($batteryOutput -match "Wireless powered:\s+true")
-
-            # Check if battery is low AND phone is NOT charging (unplugged)
-            if ($batteryLevel -le $Threshold) {
-                if (-not $isPowered) {
-                    Write-Host "[!] Battery is low ($batteryLevel%!) and phone is unplugged." -ForegroundColor Red
-                    
-                    # Trigger Windows GUI Popup Warning Box for Low Battery
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "Your Android phone battery is at $batteryLevel%! Please plug it in.", 
-                        "Low Battery Warning", 
-                        [System.Windows.Forms.MessageBoxButtons]::OK, 
-                        [System.Windows.Forms.MessageBoxIcon]::Warning
-                    )
-
-                    # Sleep for 10 minutes after an alert triggers to avoid spamming warnings
-                    Start-Sleep -Seconds 600
-                } else {
-                    Write-Host "[i] Battery is low ($batteryLevel%), but phone is currently charging. Skipping alert." -ForegroundColor DarkGray
-                }
-            }
-            # Check if battery is fully charged (100%) AND phone IS charging
-            elseif ($batteryLevel -ge 100) {
-                if ($isPowered) {
-                    Write-Host "[!] Battery is fully charged (100%) and still plugged in!" -ForegroundColor Green
-                    
-                    # Trigger Windows GUI Popup Info Box for Full Charge
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "Your Android phone battery is fully charged (100%) and still plugged in! You can unplug it.", 
-                        "Battery Fully Charged", 
-                        [System.Windows.Forms.MessageBoxButtons]::OK, 
-                        [System.Windows.Forms.MessageBoxIcon]::Information
-                    )
-
-                    # Sleep for 10 minutes after an alert triggers to avoid spamming warnings
-                    Start-Sleep -Seconds 600
-                } else {
-                    Write-Host "[i] Battery is at 100%, but phone is not charging (unplugged). Skipping alert." -ForegroundColor DarkGray
-                }
-            }
-        } else {
-            Write-Host "[?] Connected, but could not read battery level." -ForegroundColor Yellow
-        }
-    }
-
-    # Wait for the specified interval before checking again
-    Start-Sleep -Seconds $CheckIntervalSeconds
-}
+# 2. Launch the battery monitor script in a visible PowerShell window
+Write-Host "Starting live battery monitor..." -ForegroundColor Green
+& $MonitorScriptPath -PhoneIP $PhoneIP -PhonePort $PhonePort
