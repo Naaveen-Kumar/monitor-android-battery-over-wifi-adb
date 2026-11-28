@@ -32,7 +32,7 @@ param(
 
     [int]$AdbServerPort = 17537,
 
-    [string]$MonitorScriptPath = "D:\monitor_battery.ps1"
+    [string]$MonitorScriptPath = "D:\monitor-android-battery-over-wifi-adb\monitor_battery.ps1"
 )
 
 # Combine IP and port into a single ADB target address
